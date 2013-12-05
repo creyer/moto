@@ -1,5 +1,6 @@
 from moto.autoscaling import autoscaling_backend
 from moto.dynamodb import dynamodb_backend
+from moto.dynamodb2 import dynamodb_backend2
 from moto.ec2 import ec2_backend
 from moto.elb import elb_backend
 from moto.emr import emr_backend

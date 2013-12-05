@@ -173,7 +173,6 @@ class DynamoHandler(BaseResponse):
         }
 
         return dynamo_json_dump(response)"""
-
     def get_item(self):
         name = self.body['TableName']
         key = self.body['Key']
@@ -278,12 +277,10 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(result)"""
 
     def delete_item(self):
-        """name = self.body['TableName']
+        name = self.body['TableName']
         key = self.body['Key']
-        hash_key = key['HashKeyElement']
-        range_key = key.get('RangeKeyElement')
         return_values = self.body.get('ReturnValues', '')
-        item = dynamodb_backend.delete_item(name, hash_key, range_key)
+        item = dynamodb_backend2.delete_item(name, key)
         if item:
             if return_values == 'ALL_OLD':
                 item_dict = item.to_json()
@@ -292,5 +289,5 @@ class DynamoHandler(BaseResponse):
             item_dict['ConsumedCapacityUnits'] = 0.5
             return dynamo_json_dump(item_dict)
         else:
-            er = 'com.amazonaws.dynamodb.v20111205#ResourceNotFoundException'
-            return self.error(er)"""
+            er = 'com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException'
+            return self.error(er)

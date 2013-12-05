@@ -9,7 +9,9 @@ from boto.dynamodb2.fields import RangeKey
 from boto.dynamodb2.table import Table
 from boto.dynamodb2.table import Item
 
-#from boto.dynamodb2.exceptions import DynamoDBKeyNotFoundError, DynamoDBValidationError
+from boto.dynamodb.exceptions import DynamoDBKeyNotFoundError
+from boto.dynamodb2.exceptions import ValidationException
+from boto.dynamodb2.exceptions import ConditionalCheckFailedException
 from boto.exception import DynamoDBResponseError
 
 
@@ -130,14 +132,8 @@ def test_item_add_and_describe_and_update():
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     })
     
-"""
-new method to test-----get_key_fields
 
-users.get_item(**{
-...     'date-joined': 127549192,
-... }
-
-@mock_dynamodb
+@mock_dynamodb2
 def test_item_put_without_table():
     conn = boto.connect_dynamodb()
 
@@ -145,24 +141,24 @@ def test_item_put_without_table():
         table_name='undeclared-table',
         item=dict(
             hash_key='LOLCat Forum',
-            range_key='Check this out!',
+            range_key='Check this out!'
         ),
     ).should.throw(DynamoDBResponseError)
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_get_missing_item():
     conn = boto.connect_dynamodb()
-    table = create_table(conn)
+    table = create_table()
 
     table.get_item.when.called_with(
         hash_key='tester',
         range_key='other',
-    ).should.throw(DynamoDBKeyNotFoundError)
-    table.has_item("foobar", "more").should.equal(False)
+    ).should.throw(ValidationException)
+    
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_get_item_with_undeclared_table():
     conn = boto.connect_dynamodb()
 
@@ -175,96 +171,47 @@ def test_get_item_with_undeclared_table():
     ).should.throw(DynamoDBKeyNotFoundError)
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_get_item_without_range_key():
-    conn = boto.connect_dynamodb()
-    message_table_schema = conn.create_schema(
-        hash_key_name="test_hash",
-        hash_key_proto_value=int,
-        range_key_name="test_range",
-        range_key_proto_value=int,
-    )
-    table = conn.create_table(
-        name='messages',
-        schema=message_table_schema,
-        read_units=10,
-        write_units=10
-    )
-
+    table = Table.create('messages', schema=[
+        HashKey('test_hash'),
+        RangeKey('test_range'),
+    ], throughput={
+        'read': 10,
+        'write': 10,
+    })
+    
     hash_key = 3241526475
     range_key = 1234567890987
-    new_item = table.new_item(hash_key=hash_key, range_key=range_key)
-    new_item.put()
+    table.put_item( data = {'test_hash':hash_key, 'test_range':range_key})
 
-    table.get_item.when.called_with(hash_key=hash_key).should.throw(DynamoDBValidationError)
+    table.get_item.when.called_with(test_hash=hash_key).should.throw(ValidationException)
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_delete_item():
-    conn = boto.connect_dynamodb()
-    table = create_table(conn)
-
+    table = create_table()
     item_data = {
+        'forum_name': 'LOLCat Forum',
         'Body': 'http://url_to_lolcat.gif',
         'SentBy': 'User A',
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     }
-    item = table.new_item(
-        hash_key='LOLCat Forum',
-        range_key='Check this out!',
-        attrs=item_data,
-    )
-    item.put()
-
-    table.refresh()
-    table.item_count.should.equal(1)
+    item =Item(table,item_data)
+    item['subject'] = 'Check this out!'        
+    item.save()
+    table.count().should.equal(1)
 
     response = item.delete()
-    response.should.equal({u'Attributes': [], u'ConsumedCapacityUnits': 0.5})
-    table.refresh()
-    table.item_count.should.equal(0)
-
-    item.delete.when.called_with().should.throw(DynamoDBResponseError)
-
-
-@mock_dynamodb
-def test_delete_item_with_attribute_response():
-    conn = boto.connect_dynamodb()
-    table = create_table(conn)
-
-    item_data = {
-        'Body': 'http://url_to_lolcat.gif',
-        'SentBy': 'User A',
-        'ReceivedTime': '12/9/2011 11:36:03 PM',
-    }
-    item = table.new_item(
-        hash_key='LOLCat Forum',
-        range_key='Check this out!',
-        attrs=item_data,
-    )
-    item.put()
-
-    table.refresh()
-    table.item_count.should.equal(1)
-
-    response = item.delete(return_values='ALL_OLD')
-    response.should.equal({
-        u'Attributes': {
-            u'Body': u'http://url_to_lolcat.gif',
-            u'forum_name': u'LOLCat Forum',
-            u'ReceivedTime': u'12/9/2011 11:36:03 PM',
-            u'SentBy': u'User A',
-            u'subject': u'Check this out!'
-        },
-        u'ConsumedCapacityUnits': 0.5
-    })
-    table.refresh()
-    table.item_count.should.equal(0)
-
-    item.delete.when.called_with().should.throw(DynamoDBResponseError)
+    response.should.equal(True)
+    
+    table.count().should.equal(0)
+    item.delete.when.called_with().should.throw(ConditionalCheckFailedException)
 
 
-@mock_dynamodb
+
+
+@mock_dynamodb2
 def test_delete_item_with_undeclared_table():
     conn = boto.connect_dynamodb()
 
@@ -276,42 +223,39 @@ def test_delete_item_with_undeclared_table():
         },
     ).should.throw(DynamoDBResponseError)
 
-
-@mock_dynamodb
+@mock_dynamodb2
 def test_query():
-    conn = boto.connect_dynamodb()
-    table = create_table(conn)
+
+    table = create_table()
 
     item_data = {
+        'forum_name': 'LOLCat Forum',
         'Body': 'http://url_to_lolcat.gif',
         'SentBy': 'User A',
         'ReceivedTime': '12/9/2011 11:36:03 PM',
+        'subject': 'Check this out!' 
     }
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='456',
-        attrs=item_data,
-    )
-    item.put()
+    item =Item(table,item_data)     
+    item.save(overwrite=True)
+    
+    item['forum_name'] = 'the-key'
+    item['subject'] = '456'
+    item.save(overwrite=True)
 
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='123',
-        attrs=item_data,
-    )
-    item.put()
+    item['forum_name'] = 'the-key'
+    item['subject'] = '123'
+    item.save(overwrite=True)
+    
+    item['forum_name'] = 'the-key'
+    item['subject'] = '789'
+    item.save(overwrite=True)
 
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='789',
-        attrs=item_data,
-    )
-    item.put()
+    table.count().should.equal(4)
 
-    results = table.query(hash_key='the-key', range_key_condition=condition.GT('1'))
-    results.response['Items'].should.have.length_of(3)
+    results = table.query(forum_name__eq='the-key', subject__gt='1',consistent=True)
+    results.should.have.length_of(3)
 
-    results = table.query(hash_key='the-key', range_key_condition=condition.GT('234'))
+    """results = table.query(hash_key='the-key', range_key_condition=condition.GT('234'))
     results.response['Items'].should.have.length_of(2)
 
     results = table.query(hash_key='the-key', range_key_condition=condition.GT('9999'))
@@ -325,8 +269,8 @@ def test_query():
 
     results = table.query(hash_key='the-key', range_key_condition=condition.BETWEEN('567', '890'))
     results.response['Items'].should.have.length_of(1)
-
-
+"""
+"""
 @mock_dynamodb
 def test_query_with_undeclared_table():
     conn = boto.connect_dynamodb()
@@ -509,4 +453,12 @@ def test_batch_read():
     # Iterate through so that batch_item gets called
     count = len([x for x in items])
     count.should.equal(2)
+"""
+
+"""
+new method to test-----get_key_fields
+
+users.get_item(**{
+...     'date-joined': 127549192,
+... }
 """

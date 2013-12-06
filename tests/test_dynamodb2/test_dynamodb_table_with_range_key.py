@@ -1,19 +1,15 @@
 import boto
 import sure  # noqa
 from freezegun import freeze_time
-
 from moto import mock_dynamodb2
-
 from boto.dynamodb2.fields import HashKey
 from boto.dynamodb2.fields import RangeKey
 from boto.dynamodb2.table import Table
 from boto.dynamodb2.table import Item
-
 from boto.dynamodb.exceptions import DynamoDBKeyNotFoundError
 from boto.dynamodb2.exceptions import ValidationException
 from boto.dynamodb2.exceptions import ConditionalCheckFailedException
-from boto.exception import DynamoDBResponseError
-
+from boto.exception import JSONResponseError
 
 def create_table():
     table = Table.create('messages', schema=[
@@ -24,6 +20,11 @@ def create_table():
         'write': 10,
     })
     return table
+
+def iterate_results(res):
+    for i in res:
+        print i
+
 
 @freeze_time("2012-01-14")
 @mock_dynamodb2
@@ -50,16 +51,16 @@ def test_create_table():
     }
     table.describe().should.equal(expected)
 
+
 @mock_dynamodb2
 def test_delete_table():
-    conn = boto.connect_dynamodb()
+    conn = boto.dynamodb2.layer1.DynamoDBConnection()
     table = create_table()
-    conn.list_tables().should.have.length_of(1)
+    conn.list_tables()["TableNames"].should.have.length_of(1)
 
     table.delete()
-    conn.list_tables().should.have.length_of(0)
-
-    conn.layer1.delete_table.when.called_with('messages').should.throw(DynamoDBResponseError)
+    conn.list_tables()["TableNames"].should.have.length_of(0)
+    conn.delete_table.when.called_with('messages').should.throw(JSONResponseError)
 
 
 @mock_dynamodb2
@@ -73,11 +74,9 @@ def test_update_table_throughput():
         'write': 15,
      })
     
-    
     table.throughput["read"].should.equal(5)
     table.throughput["write"].should.equal(15)
 
-    
     table.update(throughput={
         'read': 5,
         'write': 6,
@@ -88,10 +87,9 @@ def test_update_table_throughput():
     table.throughput["read"].should.equal(5)
     table.throughput["write"].should.equal(6)
     
-
+    
 @mock_dynamodb2
 def test_item_add_and_describe_and_update():
-    conn = boto.connect_dynamodb()
     table = create_table()
     ok = table.put_item(data={
         'forum_name': 'LOLCat Forum',
@@ -115,7 +113,6 @@ def test_item_add_and_describe_and_update():
         'SentBy': 'User A',
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     })
-
     
     returned_item['SentBy'] = 'User B'
     returned_item.save(overwrite=True)
@@ -132,23 +129,24 @@ def test_item_add_and_describe_and_update():
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     })
     
-
+    
 @mock_dynamodb2
 def test_item_put_without_table():
-    conn = boto.connect_dynamodb()
 
-    conn.layer1.put_item.when.called_with(
-        table_name='undeclared-table',
-        item=dict(
-            hash_key='LOLCat Forum',
-            range_key='Check this out!'
-        ),
-    ).should.throw(DynamoDBResponseError)
+    table = Table('undeclared-table')
+    item_data = {
+        'forum_name': 'LOLCat Forum',
+        'Body': 'http://url_to_lolcat.gif',
+        'SentBy': 'User A',
+        'ReceivedTime': '12/9/2011 11:36:03 PM',
+    }
+    item =Item(table,item_data)   
+    item.save.when.called_with().should.throw(JSONResponseError)
 
 
 @mock_dynamodb2
 def test_get_missing_item():
-    conn = boto.connect_dynamodb()
+
     table = create_table()
 
     table.get_item.when.called_with(
@@ -157,18 +155,10 @@ def test_get_missing_item():
     ).should.throw(ValidationException)
     
 
-
 @mock_dynamodb2
 def test_get_item_with_undeclared_table():
-    conn = boto.connect_dynamodb()
-
-    conn.layer1.get_item.when.called_with(
-        table_name='undeclared-table',
-        key={
-            'HashKeyElement': {'S': 'tester'},
-            'RangeKeyElement': {'S': 'test-range'},
-        },
-    ).should.throw(DynamoDBKeyNotFoundError)
+    table = Table('undeclared-table')
+    table.get_item.when.called_with(test_hash=3241526475).should.throw(JSONResponseError)
 
 
 @mock_dynamodb2
@@ -184,7 +174,6 @@ def test_get_item_without_range_key():
     hash_key = 3241526475
     range_key = 1234567890987
     table.put_item( data = {'test_hash':hash_key, 'test_range':range_key})
-
     table.get_item.when.called_with(test_hash=hash_key).should.throw(ValidationException)
 
 
@@ -209,19 +198,19 @@ def test_delete_item():
     item.delete.when.called_with().should.throw(ConditionalCheckFailedException)
 
 
-
-
 @mock_dynamodb2
 def test_delete_item_with_undeclared_table():
     conn = boto.connect_dynamodb()
-
-    conn.layer1.delete_item.when.called_with(
-        table_name='undeclared-table',
-        key={
-            'HashKeyElement': {'S': 'tester'},
-            'RangeKeyElement': {'S': 'test-range'},
-        },
-    ).should.throw(DynamoDBResponseError)
+    table = Table("undeclared-table")
+    item_data = {
+        'forum_name': 'LOLCat Forum',
+        'Body': 'http://url_to_lolcat.gif',
+        'SentBy': 'User A',
+        'ReceivedTime': '12/9/2011 11:36:03 PM',
+    }
+    item =Item(table,item_data)
+    item.delete.when.called_with().should.throw(JSONResponseError)
+    
 
 @mock_dynamodb2
 def test_query():
@@ -253,108 +242,93 @@ def test_query():
     table.count().should.equal(4)
 
     results = table.query(forum_name__eq='the-key', subject__gt='1',consistent=True)
-    results.should.have.length_of(3)
+    sum(1 for _ in results).should.equal(3)
 
-    """results = table.query(hash_key='the-key', range_key_condition=condition.GT('234'))
-    results.response['Items'].should.have.length_of(2)
+    results = table.query(forum_name__eq='the-key', subject__gt='234',consistent=True)
+    sum(1 for _ in results).should.equal(2)
+    
+    results = table.query(forum_name__eq='the-key', subject__gt='9999')
+    sum(1 for _ in results).should.equal(0)
+    
+    results = table.query(forum_name__eq='the-key', subject__beginswith='12')
+    sum(1 for _ in results).should.equal(1)
+    
+    results = table.query(forum_name__eq='the-key', subject__beginswith='7')
+    sum(1 for _ in results).should.equal(1)
 
-    results = table.query(hash_key='the-key', range_key_condition=condition.GT('9999'))
-    results.response['Items'].should.have.length_of(0)
+    results = table.query(forum_name__eq='the-key', subject__between=['567', '890'])
+    sum(1 for _ in results).should.equal(1)
 
-    results = table.query(hash_key='the-key', range_key_condition=condition.CONTAINS('12'))
-    results.response['Items'].should.have.length_of(1)
 
-    results = table.query(hash_key='the-key', range_key_condition=condition.BEGINS_WITH('7'))
-    results.response['Items'].should.have.length_of(1)
-
-    results = table.query(hash_key='the-key', range_key_condition=condition.BETWEEN('567', '890'))
-    results.response['Items'].should.have.length_of(1)
-"""
-"""
-@mock_dynamodb
+@mock_dynamodb2
 def test_query_with_undeclared_table():
-    conn = boto.connect_dynamodb()
+    table = Table('undeclared')
+    results = table.query(
+        forum_name__eq='Amazon DynamoDB',
+        subject__beginswith='DynamoDB',
+        limit=1
+    )
+    iterate_results.when.called_with(results).should.throw(JSONResponseError)
 
-    conn.layer1.query.when.called_with(
-        table_name='undeclared-table',
-        hash_key_value={'S': 'the-key'},
-        range_key_conditions={
-            "AttributeValueList": [{
-                "S": "User B"
-            }],
-            "ComparisonOperator": "EQ",
-        },
-    ).should.throw(DynamoDBResponseError)
-
-
-@mock_dynamodb
+    
+@mock_dynamodb2
 def test_scan():
-    conn = boto.connect_dynamodb()
-    table = create_table(conn)
-
+    table = create_table()    
     item_data = {
         'Body': 'http://url_to_lolcat.gif',
         'SentBy': 'User A',
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     }
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='456',
-        attrs=item_data,
-    )
-    item.put()
+    item_data['forum_name'] = 'the-key'
+    item_data['subject'] = '456'
+    
+    item = Item(table,item_data)     
+    item.save()    
 
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='123',
-        attrs=item_data,
-    )
-    item.put()
-
+    item['forum_name'] = 'the-key'
+    item['subject'] = '123'
+    item.save()
+   
     item_data = {
         'Body': 'http://url_to_lolcat.gif',
         'SentBy': 'User B',
-        'ReceivedTime': '12/9/2011 11:36:03 PM',
+        'ReceivedTime': '12/9/2011 11:36:09 PM',
         'Ids': set([1, 2, 3]),
         'PK': 7,
     }
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='789',
-        attrs=item_data,
-    )
-    item.put()
+    
+    item_data['forum_name'] = 'the-key'
+    item_data['subject'] = '789'
+    
+    item = Item(table,item_data)     
+    item.save()    
 
     results = table.scan()
-    results.response['Items'].should.have.length_of(3)
+    sum(1 for _ in results).should.equal(3)
 
-    results = table.scan(scan_filter={'SentBy': condition.EQ('User B')})
-    results.response['Items'].should.have.length_of(1)
+    results = table.scan(SentBy__eq='User B')
+    sum(1 for _ in results).should.equal(1)
 
-    results = table.scan(scan_filter={'Body': condition.BEGINS_WITH('http')})
-    results.response['Items'].should.have.length_of(3)
+    results = table.scan(Body__beginswith='http')
+    sum(1 for _ in results).should.equal(3)
 
-    results = table.scan(scan_filter={'Ids': condition.CONTAINS(2)})
-    results.response['Items'].should.have.length_of(1)
+    results = table.scan(Ids__null=False)
+    sum(1 for _ in results).should.equal(1)
+    
+    results = table.scan(Ids__null=True)
+    sum(1 for _ in results).should.equal(2)
+    
+    results = table.scan(PK__between=[8, 9])
+    sum(1 for _ in results).should.equal(0)
 
-    results = table.scan(scan_filter={'Ids': condition.NOT_NULL()})
-    results.response['Items'].should.have.length_of(1)
-
-    results = table.scan(scan_filter={'Ids': condition.NULL()})
-    results.response['Items'].should.have.length_of(2)
-
-    results = table.scan(scan_filter={'PK': condition.BETWEEN(8, 9)})
-    results.response['Items'].should.have.length_of(0)
-
-    results = table.scan(scan_filter={'PK': condition.BETWEEN(5, 8)})
-    results.response['Items'].should.have.length_of(1)
+    results = table.scan(PK__between=[5, 8])
+    sum(1 for _ in results).should.equal(1)
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_scan_with_undeclared_table():
-    conn = boto.connect_dynamodb()
-
-    conn.layer1.scan.when.called_with(
+    conn = boto.dynamodb2.layer1.DynamoDBConnection()
+    conn.scan.when.called_with(
         table_name='undeclared-table',
         scan_filter={
             "SentBy": {
@@ -364,76 +338,57 @@ def test_scan_with_undeclared_table():
                 "ComparisonOperator": "EQ"
             }
         },
-    ).should.throw(DynamoDBResponseError)
+    ).should.throw(JSONResponseError)
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_write_batch():
-    conn = boto.connect_dynamodb()
-    table = create_table(conn)
-
-    batch_list = conn.new_batch_write_list()
-
-    items = []
-    items.append(table.new_item(
-        hash_key='the-key',
-        range_key='123',
-        attrs={
+    table = create_table()
+    with table.batch_write() as batch:
+        batch.put_item(data={
+            'forum_name': 'the-key',
+            'subject': '123',
             'Body': 'http://url_to_lolcat.gif',
             'SentBy': 'User A',
             'ReceivedTime': '12/9/2011 11:36:03 PM',
-        },
-    ))
-
-    items.append(table.new_item(
-        hash_key='the-key',
-        range_key='789',
-        attrs={
+        })  
+        batch.put_item(data={
+            'forum_name': 'the-key',
+            'subject': '789',
             'Body': 'http://url_to_lolcat.gif',
             'SentBy': 'User B',
             'ReceivedTime': '12/9/2011 11:36:03 PM',
-            'Ids': set([1, 2, 3]),
-            'PK': 7,
-        },
-    ))
+        }) 
+        
+    table.count().should.equal(2)
+    with table.batch_write() as batch:
+        batch.delete_item(
+            forum_name='the-key',
+            subject='789'
+        )
 
-    batch_list.add_batch(table, puts=items)
-    conn.batch_write_item(batch_list)
-
-    table.refresh()
-    table.item_count.should.equal(2)
-
-    batch_list = conn.new_batch_write_list()
-    batch_list.add_batch(table, deletes=[('the-key', '789')])
-    conn.batch_write_item(batch_list)
-
-    table.refresh()
-    table.item_count.should.equal(1)
+    table.count().should.equal(1)
 
 
-@mock_dynamodb
+@mock_dynamodb2
 def test_batch_read():
-    conn = boto.connect_dynamodb()
-    table = create_table(conn)
-
+    table = create_table()
     item_data = {
         'Body': 'http://url_to_lolcat.gif',
         'SentBy': 'User A',
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     }
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='456',
-        attrs=item_data,
-    )
-    item.put()
+    
+    item_data['forum_name'] = 'the-key'
+    item_data['subject'] = '456'
+    
+    item = Item(table,item_data)     
+    item.save()    
 
-    item = table.new_item(
-        hash_key='the-key',
-        range_key='123',
-        attrs=item_data,
-    )
-    item.put()
+    item = Item(table,item_data) 
+    item_data['forum_name'] = 'the-key'
+    item_data['subject'] = '123'
+    item.save() 
 
     item_data = {
         'Body': 'http://url_to_lolcat.gif',
@@ -442,23 +397,14 @@ def test_batch_read():
         'Ids': set([1, 2, 3]),
         'PK': 7,
     }
-    item = table.new_item(
-        hash_key='another-key',
-        range_key='789',
-        attrs=item_data,
-    )
-    item.put()
+    item = Item(table,item_data) 
+    item_data['forum_name'] = 'another-key'
+    item_data['subject'] = '789'
+    item.save() 
+    results = table.batch_get(keys=[
+                {'forum_name': 'the-key', 'subject': '123'},
+                {'forum_name': 'another-key', 'subject': '789'}])
 
-    items = table.batch_get_item([('the-key', '123'), ('another-key', '789')])
     # Iterate through so that batch_item gets called
-    count = len([x for x in items])
+    count = len([x for x in results])
     count.should.equal(2)
-"""
-
-"""
-new method to test-----get_key_fields
-
-users.get_item(**{
-...     'date-joined': 127549192,
-... }
-"""

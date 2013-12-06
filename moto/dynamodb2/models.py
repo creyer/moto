@@ -177,95 +177,12 @@ class Table(object):
                 return self.items.pop(hash_key)
         except KeyError:
             return None
-    """
-    def __init__(self, name, hash_key_attr, hash_key_type,
-                 range_key_attr=None, range_key_type=None, read_capacity=None,
-                 write_capacity=None):
-        self.name = name
-        self.hash_key_attr = hash_key_attr
-        self.hash_key_type = hash_key_type
-        self.range_key_attr = range_key_attr
-        self.range_key_type = range_key_type
-        self.read_capacity = read_capacity
-        self.write_capacity = write_capacity
-        self.created_at = datetime.datetime.now()
-        self.items = defaultdict(dict)
-    
-    @property
-    def has_range_key(self):
-        return self.range_key_attr is not None
-    
-    @property
-    def describe(self):
-        results = {
-            "Table": {
-                "CreationDateTime": unix_time(self.created_at),
-                "KeySchema": {
-                    "HashKeyElement": {
-                        "AttributeName": self.hash_key_attr,
-                        "AttributeType": self.hash_key_type
-                    },
-                },
-                "ProvisionedThroughput": {
-                    "ReadCapacityUnits": self.read_capacity,
-                    "WriteCapacityUnits": self.write_capacity
-                },
-                "TableName": self.name,
-                "TableStatus": "ACTIVE",
-                "ItemCount": len(self),
-                "TableSizeBytes": 0,
-            }
-        }
-        if self.has_range_key:
-            results["Table"]["KeySchema"]["RangeKeyElement"] = {
-                "AttributeName": self.range_key_attr,
-                "AttributeType": self.range_key_type
-            }
-        return results
-    
-    def __len__(self):
-        count = 0
-        for key, value in self.items.iteritems():
-            if self.has_range_key:
-                count += len(value)
-            else:
-                count += 1
-        return count
-
-    def __nonzero__(self):
-        return True
-    
-    def put_item(self, item_attrs):
-        hash_value = DynamoType(item_attrs.get(self.hash_key_attr))
-        if self.has_range_key:
-            range_value = DynamoType(item_attrs.get(self.range_key_attr))
-        else:
-            range_value = None
-
-        item = Item(hash_value, self.hash_key_type, range_value, self.range_key_type, item_attrs)
-
-        if range_value:
-            self.items[hash_value][range_value] = item
-        else:
-            self.items[hash_value] = item
-        return item
-
-    def get_item(self, hash_key, range_key):
-        if self.has_range_key and not range_key:
-            raise ValueError("Table has a range key, but no range key was passed into get_item")
-        try:
-            if range_key:
-                return self.items[hash_key][range_key]
-            else:
-                return self.items[hash_key]
-        except KeyError:
-            return None
-
+        
     def query(self, hash_key, range_comparison, range_objs):
         results = []
         last_page = True  # Once pagination is implemented, change this
 
-        possible_results = list(self.all_items())
+        possible_results =  [ item for item in list(self.all_items()) if item.hash_key == hash_key] 
         if range_comparison:
             for result in possible_results:
                 if result.range_key.compare(range_comparison, range_objs):
@@ -282,7 +199,7 @@ class Table(object):
                     yield item
             else:
                 yield hash_set
-
+                
     def scan(self, filters):
         results = []
         scanned_count = 0
@@ -309,18 +226,8 @@ class Table(object):
 
             if passes_all_conditions:
                 results.append(result)
-
         return results, scanned_count, last_page
-
-    def delete_item(self, hash_key, range_key):
-        try:
-            if range_key:
-                return self.items[hash_key].pop(range_key)
-            else:
-                return self.items.pop(hash_key)
-        except KeyError:
-            return None"""
-
+    
 
 class DynamoDBBackend(BaseBackend):
 
@@ -345,24 +252,26 @@ class DynamoDBBackend(BaseBackend):
         if not table:
             return None
         return table.put_item(item_attrs)
-
-    def get_keys(self,table,key):
-        if not table.hash_key_attr in key or (table.has_range_key and not table.range_key_attr in key):
+    
+    def get_table_keys_name(self, table_name):
+        table = self.tables.get(table_name)
+        if not table:
+            return None, None
+        else:
+            return table.hash_key_attr, table.range_key_attr
+         
+    def get_keys_value(self, table, keys):
+        if not table.hash_key_attr in keys or (table.has_range_key and not table.range_key_attr in keys):
             raise ValueError("Table has a range key, but no range key was passed into get_item")        
-        hash_key = DynamoType(key[table.hash_key_attr])    
-        range_key = DynamoType(key[table.range_key_attr]) if table.has_range_key else None
+        hash_key = DynamoType(keys[table.hash_key_attr])    
+        range_key = DynamoType(keys[table.range_key_attr]) if table.has_range_key else None
         return hash_key,range_key
 
-    def get_item(self, table_name, key):
+    def get_item(self, table_name, keys):
         table = self.tables.get(table_name)
         if not table:
             return None
-        hash_key,range_key = self.get_keys(table,key)
-        """if not table.hash_key_attr in key or (table.has_range_key and not table.range_key_attr in key):
-            raise ValueError("Table has a range key, but no range key was passed into get_item")
-        
-        hash_key = DynamoType(key[table.hash_key_attr])    
-        range_key = DynamoType(key[table.range_key_attr]) if table.has_range_key else None"""
+        hash_key,range_key = self.get_keys_value(table,keys)
         return table.get_item(hash_key, range_key)
 
     def query(self, table_name, hash_key_dict, range_comparison, range_value_dicts):
@@ -374,7 +283,7 @@ class DynamoDBBackend(BaseBackend):
         range_values = [DynamoType(range_value) for range_value in range_value_dicts]
 
         return table.query(hash_key, range_comparison, range_values)
-    """
+    
     def scan(self, table_name, filters):
         table = self.tables.get(table_name)
         if not table:
@@ -386,12 +295,12 @@ class DynamoDBBackend(BaseBackend):
             scan_filters[key] = (comparison_operator, dynamo_types)
 
         return table.scan(scan_filters)
-"""
-    def delete_item(self, table_name, key):
+    
+    def delete_item(self, table_name, keys):
         table = self.tables.get(table_name)
         if not table:
             return None
-        hash_key, range_key = self.get_keys(table, key)
+        hash_key, range_key = self.get_keys_value(table, keys)
         return table.delete_item(hash_key, range_key)
 
 

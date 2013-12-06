@@ -100,11 +100,7 @@ class DynamoHandler(BaseResponse):
                    schema = key_schema,           
                    throughput = throughput, 
                    attr = attr)
-        #print "table_name: %s, throughput: %s, key_schema: %s" % (table_name,throughput,key_schema)
-        print dynamo_json_dump(table.describe)
-        #print body
-        return dynamo_json_dump(table.describe)
-        
+        return dynamo_json_dump(table.describe)        
 
     def delete_table(self):
         name = self.body['TableName']
@@ -144,21 +140,18 @@ class DynamoHandler(BaseResponse):
             return self.error(er)
 
     def batch_write_item(self):
-        """table_batches = self.body['RequestItems']
+        table_batches = self.body['RequestItems']
 
         for table_name, table_requests in table_batches.iteritems():
             for table_request in table_requests:
                 request_type = table_request.keys()[0]
                 request = table_request.values()[0]
-
                 if request_type == 'PutRequest':
                     item = request['Item']
-                    dynamodb_backend.put_item(table_name, item)
+                    dynamodb_backend2.put_item(table_name, item)
                 elif request_type == 'DeleteRequest':
-                    key = request['Key']
-                    hash_key = key['HashKeyElement']
-                    range_key = key.get('RangeKeyElement')
-                    item = dynamodb_backend.delete_item(table_name, hash_key, range_key)
+                    keys = request['Key']
+                    item = dynamodb_backend2.delete_item(table_name, keys)
 
         response = {
             "Responses": {
@@ -172,7 +165,7 @@ class DynamoHandler(BaseResponse):
             "UnprocessedItems": {}
         }
 
-        return dynamo_json_dump(response)"""
+        return dynamo_json_dump(response)
     def get_item(self):
         name = self.body['TableName']
         key = self.body['Key']
@@ -191,11 +184,13 @@ class DynamoHandler(BaseResponse):
             return self.error(er, status=404)
 
     def batch_get_item(self):
-        """table_batches = self.body['RequestItems']
+        table_batches = self.body['RequestItems']
 
-        results = {
-            "Responses": {
-                "UnprocessedKeys": {}
+        results = { 
+            "ConsumedCapacity":[],
+            "Responses": {                
+            },
+            "UnprocessedKeys": {
             }
         }
 
@@ -203,33 +198,47 @@ class DynamoHandler(BaseResponse):
             items = []
             keys = table_request['Keys']
             attributes_to_get = table_request.get('AttributesToGet')
+            results["Responses"][table_name]=[]
             for key in keys:
-                hash_key = key["HashKeyElement"]
-                range_key = key.get("RangeKeyElement")
-                item = dynamodb_backend.get_item(table_name, hash_key, range_key)
+                item = dynamodb_backend2.get_item(table_name, key)
                 if item:
                     item_describe = item.describe_attrs(attributes_to_get)
-                    items.append(item_describe)
-            results["Responses"][table_name] = {"Items": items, "ConsumedCapacityUnits": 1}
-        return dynamo_json_dump(results)"""
+                    results["Responses"][table_name].append(item_describe["Item"])
+
+            results["ConsumedCapacity"].append({
+                "CapacityUnits": len(keys),
+                "TableName": table_name
+            })
+        return dynamo_json_dump(results)
 
     def query(self):
-        """name = self.body['TableName']
-        hash_key = self.body['HashKeyValue']
-        range_condition = self.body.get('RangeKeyCondition')
-        if range_condition:
-            range_comparison = range_condition['ComparisonOperator']
-            range_values = range_condition['AttributeValueList']
-        else:
+        name = self.body['TableName']
+        keys = self.body['KeyConditions']
+        hash_key_name, range_key_name = dynamodb_backend2.get_table_keys_name(name)
+        if hash_key_name is None:
+            er = "'com.amazonaws.dynamodb.v20120810#ResourceNotFoundException"  
+            return self.error(er)
+        hash_key = keys[hash_key_name]['AttributeValueList'][0]
+        if len(keys) == 1:
             range_comparison = None
             range_values = []
-
-        items, last_page = dynamodb_backend.query(name, hash_key, range_comparison, range_values)
-
+        else:
+            if range_key_name == None:
+                er = "com.amazon.coral.validate#ValidationException"  
+                return self.error(er)
+            else:
+                range_condition = keys[range_key_name]
+                if range_condition:
+                    range_comparison = range_condition['ComparisonOperator']
+                    range_values = range_condition['AttributeValueList']
+                else:
+                    range_comparison = None
+                    range_values = []
+        items, last_page = dynamodb_backend2.query(name, hash_key, range_comparison, range_values)
         if items is None:
             er = 'com.amazonaws.dynamodb.v20111205#ResourceNotFoundException'
-            return self.error(er)
-
+            return self.error(er) 
+        
         result = {
             "Count": len(items),
             "Items": [item.attrs for item in items],
@@ -242,10 +251,10 @@ class DynamoHandler(BaseResponse):
         #         "HashKeyElement": items[-1].hash_key,
         #         "RangeKeyElement": items[-1].range_key,
         #     }
-        return dynamo_json_dump(result)"""
+        return dynamo_json_dump(result)
 
     def scan(self):
-        """name = self.body['TableName']
+        name = self.body['TableName']
 
         filters = {}
         scan_filters = self.body.get('ScanFilter', {})
@@ -255,7 +264,7 @@ class DynamoHandler(BaseResponse):
             comparison_values = scan_filter.get("AttributeValueList", [])
             filters[attribute_name] = (comparison_operator, comparison_values)
 
-        items, scanned_count, last_page = dynamodb_backend.scan(name, filters)
+        items, scanned_count, last_page = dynamodb_backend2.scan(name, filters)
 
         if items is None:
             er = 'com.amazonaws.dynamodb.v20111205#ResourceNotFoundException'
@@ -274,13 +283,13 @@ class DynamoHandler(BaseResponse):
         #         "HashKeyElement": items[-1].hash_key,
         #         "RangeKeyElement": items[-1].range_key,
         #     }
-        return dynamo_json_dump(result)"""
+        return dynamo_json_dump(result)
 
     def delete_item(self):
         name = self.body['TableName']
-        key = self.body['Key']
+        keys = self.body['Key']
         return_values = self.body.get('ReturnValues', '')
-        item = dynamodb_backend2.delete_item(name, key)
+        item = dynamodb_backend2.delete_item(name, keys)
         if item:
             if return_values == 'ALL_OLD':
                 item_dict = item.to_json()

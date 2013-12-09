@@ -97,6 +97,10 @@ class Table(object):
         self.name = table_name
         self.attr = attr
         self.schema = schema
+        self.range_key_attr = None
+        self.hash_key_attr = None
+        self.range_key_type = None
+        self.hash_key_type = None
         for elem in schema:
             if elem["KeyType"] == "HASH":
                 self.hash_key_attr = elem["AttributeName"]
@@ -104,8 +108,10 @@ class Table(object):
             else:
                 self.range_key_attr = elem["AttributeName"]
                 self.range_key_type = elem["KeyType"]
-        
-        self.throughput = throughput
+        if throughput is None:
+             self.throughput = {u'WriteCapacityUnits': 10, u'ReadCapacityUnits': 10}
+        else:
+            self.throughput = throughput
         self.throughput["NumberOfDecreasesToday"] = 0
         self.indexes = indexes
         self.created_at = datetime.datetime.now()
@@ -235,6 +241,7 @@ class DynamoDBBackend(BaseBackend):
         self.tables = OrderedDict()
 
     def create_table(self, name, **params):
+        print params
         table = Table(name, **params)
         self.tables[name] = table
         return table

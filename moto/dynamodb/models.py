@@ -80,7 +80,7 @@ class Item(object):
             "Attributes": attributes
         }
 
-    def describe_attrs(self, attributes):
+    def describe_attrs(self, attributes=None):
         if attributes:
             included = {}
             for key, value in self.attrs.iteritems():

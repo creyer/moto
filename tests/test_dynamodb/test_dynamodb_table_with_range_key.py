@@ -281,6 +281,14 @@ def test_query():
         'SentBy': 'User A',
         'ReceivedTime': '12/9/2011 11:36:03 PM',
     }
+    
+    item = table.new_item(
+        hash_key='the-key1',
+        range_key='4561',
+        attrs=item_data,
+    )
+    item.put()
+    
     item = table.new_item(
         hash_key='the-key',
         range_key='456',
@@ -301,7 +309,7 @@ def test_query():
         attrs=item_data,
     )
     item.put()
-
+    """
     results = table.query(hash_key='the-key', range_key_condition=condition.GT('1'))
     results.response['Items'].should.have.length_of(3)
 
@@ -310,7 +318,8 @@ def test_query():
 
     results = table.query(hash_key='the-key', range_key_condition=condition.GT('9999'))
     results.response['Items'].should.have.length_of(0)
-
+    """
+    print "::::::::::::"
     results = table.query(hash_key='the-key', range_key_condition=condition.CONTAINS('12'))
     results.response['Items'].should.have.length_of(1)
 

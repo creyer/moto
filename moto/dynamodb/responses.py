@@ -87,7 +87,6 @@ class DynamoHandler(BaseResponse):
 
     def create_table(self):
         body = self.body
-        print body
         name = body['TableName']
 
         key_schema = body['KeySchema']
@@ -112,7 +111,6 @@ class DynamoHandler(BaseResponse):
             read_capacity=int(read_units),
             write_capacity=int(write_units),
         )
-        print dynamo_json_dump(table.describe)
         return dynamo_json_dump(table.describe)
 
     def delete_table(self):

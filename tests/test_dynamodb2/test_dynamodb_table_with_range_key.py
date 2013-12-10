@@ -66,7 +66,6 @@ def test_delete_table():
 @mock_dynamodb2
 def test_update_table_throughput():
     table = create_table()
-    print table.throughput
     table.throughput["read"].should.equal(10)
     table.throughput["write"].should.equal(10)    
     table.update(throughput={
@@ -408,3 +407,9 @@ def test_batch_read():
     # Iterate through so that batch_item gets called
     count = len([x for x in results])
     count.should.equal(2)
+
+@mock_dynamodb2
+def test_get_key_fields():
+    table = create_table()
+    kf = table.get_key_fields()
+    kf.should.equal(['forum_name','subject'])

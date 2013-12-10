@@ -28,7 +28,6 @@ class BaseResponse(object):
         self.method = request.method
         self.headers = dict(request.headers)
         self.response_headers = headers
-        print "request: %s, headers: %s, full_url: %s, querystring: %s, path: %s, body: %s" % (request, self.headers, full_url, self.querystring, self.path, self.body)
         
         return self.call_action()
 

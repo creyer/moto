@@ -1,22 +1,13 @@
 import boto
 import sure  # noqa
 from freezegun import freeze_time
-
 from boto.exception import JSONResponseError
 from moto import mock_dynamodb2
 from boto.dynamodb2.fields import HashKey
 from boto.dynamodb2.fields import RangeKey
 from boto.dynamodb2.table import Table
 from boto.dynamodb2.table import Item
-"""
-new method to test-----get_key_fields
 
-users.get_item(**{
-...     'date-joined': 127549192,
-... }
-
-test decrese troughput
-"""
 def create_table():
     table = Table.create('messages', schema=[
         HashKey('forum_name')
@@ -344,3 +335,27 @@ def test_batch_read():
     count.should.equal(2)
 
 
+@mock_dynamodb2
+def test_get_key_fields():
+    table = create_table()
+    kf = table.get_key_fields()
+    kf[0].should.equal('forum_name')
+
+
+@mock_dynamodb2
+def test_get_special_item():
+    table = Table.create('messages', schema=[
+        HashKey('date-joined')
+    ], throughput={
+        'read': 10,
+        'write': 10,
+    })
+    
+    data={
+        'date-joined': 127549192,
+        'SentBy': 'User A',
+    }
+    table.put_item(data = data)
+    returned_item = table.get_item(**{'date-joined': 127549192})
+    dict(returned_item).should.equal(data)
+    
